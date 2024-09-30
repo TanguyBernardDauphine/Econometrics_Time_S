@@ -1,0 +1,926 @@
+---
+title: "Projet d'économétrie en séries temporelles"
+subtitle: "Étude empirique de la relation inflation-chômage aux États-Unis de 1990 à 2016"
+author: "Tanguy Bernard - Léonie Chollet--Aucante"
+output: 
+  html_document:
+  toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+  Le but de ce projet d'économétrie est de vérifier empiriquement si la relation inflation-chômage est vérifiée aux Etats-Unis. Mais avant toute analyse il est nécessaire de revenir sur l'histoire de la relation inflation-chômage (aussi appelée par abus de langage courbe de Phillips).
+  
+William Phillips économiste néo-zélandais du XX^ème^ siècle "souhaitais vérifier empiriquement l'idée que le marché du travail fonctionne comme n'importe quel autre marché : les périodes de forte demande suscitent des tensions la hausse sur les prix, donc un faible chômage devrait se traduire par de l'inflation salariale ; et réciproquement" ^1^.
+
+$\pi_{t}=\pi_{t}^{e}+(\mu +z)-\alpha u_{t}$ avec $\pi_{t}$: le taux d'inflation à la date t, $\pi_{t}^{e}$: le taux d'inflation anticipé pour la date t à la date t-1, $\mu$: le taux de marge appliqué par les firmes, $z$: le pouvoir de négociation des salariés, $u_{t}$: le taux de chômage à la date t.
+
+Williams Phillips dont l'étude est parue en 1958, a supposé que les anticipations des agents étaient constantes puisque pendant les trentes glorieuses le taux d'inflation était faible et stable. Donc les agents économiques pouvaient supposer que ce taux allait rester le même.
+
+Donc pour Phillips $\pi_{t}^{e}=\overline{\pi}$, de plus on peut calculer le taux de chômage naturel $u_{n}$ qui est le taux de chômage lorsque les agents anticipent correctement l'inflation donc $\pi_{t}^{e}=\pi_{t}$.
+
+$$\pi_{t}^{e}=\pi_{t}\Rightarrow \pi_{t}=\pi_{t}+(\mu + z)-\alpha u_{n}\Rightarrow \alpha u_{n}=\mu +z \\u_{n}=\frac{\mu +z}{\alpha}$$ Donc $$\pi_{t}=\pi_{t}^{e}+(\mu +z)-\alpha u_{t}\Leftrightarrow \pi_{t}=\overline{\pi}+(\mu +z)-\alpha u_{t}\\\pi_{t}=\overline{\pi}+\alpha u_{n}-\alpha u_{t}\Leftrightarrow \pi_{t}=\overline{\pi}-\alpha(u_{t}-u_{n})$$
+Cette équation nous la réécrivons pour faire en sorte que le taux d'inflation dépend uniquement du taux de chômage.
+
+$$\pi_{t}=\overline{\pi}-\alpha(u_{t}-u_{n})\Leftrightarrow \pi_{t}=\overline{\pi}-\alpha u_{t}+\alpha u_{n}\Leftrightarrow \pi_{t}=-\alpha u_{t}+\overline{\pi}+\alpha u_{n}\\ \pi_{t}=-\alpha u_{t}+\overline{\pi}+\alpha u_{n}\Leftrightarrow \pi_{t}=\alpha +\beta u_{t}+\varepsilon_{t}$$
+
+Nous avons donc ici la relation inflation-chômage originelle (communément appelée Courbe de Phillips), mais à la fin des années 60 des chocs sur l'économie entraîne une variation à la hausse de l'inflation qui n'est désormais plus "constante", donc les agents sont amener à réviser leurs anticipations. Pour Friedman et Phelps (1968) "les agents n'étant pas victime d'illusion nominale, la courbe de Phillips doit être augmentée des anticipations d'inflation ; les agents révisent leurs anticipations d'inflation en fonction de leurs observations passées du comportement des prix" ^2^.
+
+Donc la relation de Phillips augmentée s'écrit : $\pi_{t}=\pi_{t}^{e}-\alpha(u_{t}-u_{n})$
+
+De plus le taux d'inflation anticipé dépend du taux d'inflation observé à la période précédente. L'arbitrage inflation-chômage se dégrade et la courbe de Phillips d'après les observations de Friedman en 1968 se décalerait vers la droite. 
+
+Mais quand est-t-il dorénavant ? Est-ce-que la relation inflation-chômage est toujours vérifiée ? Ou bien celle-ci n'existe-t-elle plus ?
+
+# Préparation de l'environnement
+Avant toute analyse il est impératif de nettoyer son environnement de travail sous `RStudio` à l'aide de la commande `rm(list=ls())`. Mais il faut également indiqué le répertoire de travail à l'aide de la commande `setwd()`.
+```{r}
+rm(list=ls())
+setwd(dir="C:/Users/bernta19/Desktop/Test_Projet_Econometrie/")
+```
+
+# Installation des packages
+L'étude nécessite l'installation de packages via la commande `install.packages()` qui serviront à l'importation de données issues de la FRED (`fredr`), l'analyse en séries temporelles (`xts`) et la représentation graphique (`ggplot2`).
+```{r}
+library(fredr)
+library(ggplot2)
+library(xts)
+library(lubridate)
+library(urca)
+library(forecast)
+library(lmtest)
+library(FinTS)
+library(moments)
+library(tseries)
+```
+
+# Modélisation univariée de la relation inflation-chômage
+
+## Choix des séries temporelles 
+
+Nous étudions donc la relation inflation-chômage aux Etats-Unis. L'étude utilisera des données trimestrielles issues de la FRED sur le taux de chômage et l'inflation aux États-Unis de janvier 1990 à décembre 2016. Nous avons décidé de nous concentrer sur cette période et de ne pas considérer les données jusqu'à 2023 pour éviter la crise COVID qui pourrait fausser nos résultats. Notre base de données est composée de 108 observations. Nos deux séries étaient déjà corrigées des variations saisonnières au moment de l'importation.
+
+
+### Taux de chômage aux États-Unis
+Les données mensuelles sur la période 1990/01/01 - 2016/12/01 du taux de chômage aux États-Unis^3^ sont importées à l'aide du bloc de code ci-dessous.
+```{r}
+db_unemp_r <- read.csv("UNRATE.csv", header=TRUE)
+class(db_unemp_r$DATE)
+db_unemp_r$DATE <- as.Date(db_unemp_r$DATE,"%Y-%m-%d")
+colnames(db_unemp_r) <- c("dates","taux de chômage")
+unemp_r <- ts(as.numeric(db_unemp_r[,2]),start=c(1948,1),frequency=4)
+```
+La série temporelle du taux de chômage sera représentée par la variable $u_{t}$, $u$ pour *unemployment rate*.
+
+### Taux d'inflation aux États-Unis
+Nous avons choisi d'utiliser la variation de l'indice des prix à la consommation (IPC) pour représenter le taux d'inflation. L'IPC utilisé sera l'IPC médian^6^ car celui-ci possède l'avantage de représenter le plus fidèlement possible l'évolution de l'inflation non influencés par les variations extrêmes de certains biens. La méthodologie de calcul de l'IPC médian est indiqué en annexe. 
+Les données trimestrielles sur la période 1990/01/01 - 2016/12/01 du taux d'inflation aux États-Unis^5^ sont importées à l'aide du bloc de code ci-dessous.
+
+```{r}
+db_m_cpi <- read.csv("MEDCPIM158SFRBCLE.csv")
+class(db_m_cpi$DATE)
+db_m_cpi$DATE <- as.Date(db_m_cpi$DATE,"%Y-%m-%d")
+colnames(db_m_cpi) <- c("dates","Median CPI")
+m_cpi <- ts(as.numeric(db_m_cpi[,2]),start=c(1983,1),frequency=4)
+```
+La série temporelle du taux d'inflation sera quant à elle dénotée par la variable $mcpi_{t}$, $mcpi$ pour *median consumer price index*
+
+### Création de la base de donnée
+Au moment d'importer la base de données, les données commençaient à partir à partir de 1948 pour le taux de chômage et 1983 pour le taux d'inflation. Nous avons du recadrer notre base puisque notre étude ne porte que sur les années 1990 à 2016.
+```{r}
+dates <- seq.Date(from=as.Date("1990/01/01"),to=as.Date("2016/10/01"),by="quarter")
+unemp_r <- window(unemp_r,start=c(1990,1),end=c(2016,4),frequency=4)
+m_cpi <- window(m_cpi,start=c(1990,1),end=c(2016,4),frequency=4)
+df <- data.frame(
+  unemp_r,
+  m_cpi,
+  dates
+)
+```
+
+## Représentations graphiques 
+
+### Le taux de chômage
+
+#### Représentation graphique dans le temps
+
+```{r}
+ts.plot(df$unemp_r,
+        ylab="taux de chômage",xlab="temps",
+        col=c("blue"),
+        main="Taux de chômage mensuel de 1990 à 2016")
+title(sub="Données trimestrielles CVS de 1990 à 2016, source: FRED",
+      cex.sub=0.5,font.sub=3,adj=1)
+```
+
+#### Autocorrélogramme simple
+
+```{r}
+acf(coredata(df$unemp_r),main="")
+title(main="Autocorrélation du taux de chômage",
+      cex.main=1,cex.lab=0.7)
+title(sub="Données de 1990 à 2016, source: FRED",
+      cex.sub=0.5,font.sub=3,adj=1)
+```
+
+Il est possible de noter que les autocorrélations sont très proches de 1 et décroissent très lentement
+à mesure que le nombre de décalages augmentent. Ceci peut être un signe de nonstationnarité. Par ailleurs à partir du retard 17 ils deviennent à nouveaux significatifs et négatifs.
+
+
+#### Autocorrélogramme partiel 
+
+```{r}
+pacf(coredata(df$unemp_r),main="")
+title(main="Autocorrélation partielle du taux de chômage",
+      cex.main=1,cex.lab=0.7)
+title(sub="Données de 1990 à 2016, source: FRED",
+      cex.sub=0.5,font.sub=3,adj=1)
+```
+
+Notons que le premier retard est très proche de 1, le deuxième retard est quant à lui très proche de -1. Puis les retards suivants (hormis le 3 qui est significatif et négatif) sont très proches de 0. Ceci peut être un signe de non-stationnarité. 
+
+
+### Le taux d'inflation
+
+#### Représentation graphique dans le temps
+
+```{r}
+ts.plot(m_cpi,
+        ylab="Median CPI",xlab="temps",
+        col=c("blue"),
+        main="Median CPI mensuel de 1990 à 2016")
+title(sub="Données mensuelles CVS de 1990 à 2016, source: FRED",
+      cex.sub=0.5,font.sub=3,adj=1)
+```
+
+#### Autocorrélogramme simple
+
+```{r}
+acf(coredata(df$m_cpi),main="")
+title(main="Autocorrélation du taux d'inflation",
+      cex.main=1,cex.lab=0.7)
+title(sub="Données de 1990 à 2016, source: FRED",
+      cex.sub=0.5,font.sub=3,adj=1)
+```
+
+Décroissance vers 0 brutale, ce qui laisse penser à une stationnarité. Attention en revanche le vingtième retard semble être positif. 
+
+### Autocorrélogramme partiel
+
+```{r}
+pacf(coredata(df$m_cpi),main="")
+title(main="Autocorrélation partielle du taux d'inflation",
+      cex.main=1,cex.lab=0.7)
+title(sub="Données de 1990 à 2016, source: FRED",
+      cex.sub=0.5,font.sub=3,adj=1)
+```
+
+Constatons que le premier retard est proche de 1. Le 2ème retard est aussi significatif. Les retards suivants en recanche ne sont pas significatifs. De ce fait, on peut penser à une stationnarité.
+
+
+Avant tout approfondissement de notre analyse il faut que stationnariser l'ensemble de nos séries. Encore faut-il savoir la nature de nos séries temporelles : TS (*Trend Stationnary*) et dans ce cas là il faut stationnariser par estimation et soustraction, DS (*Difference Stationnary*) et il faudra stationnariser par différence. Adopter la mauvaise méthode de stationnarisation peut mener à une régression falacieuse (*spurious regression*) et donc biaisé/faussé le reste de notre analyse.
+Pour vérifier la nature de nos séries nous allons appliquer la stratégie de tests de racine unitaire augmentées à chaque série.
+
+## Test de racine unitaire augmentés - Dickey-Fuller augmentés (ADF)
+
+Il faut savoir que les tests de racine unitaire augmentés découlent des tests de Dickey-Fuller simple. Mais  les tests DF simple reposent sur l'hypothèse que les bruits blancs (erreurs temporelles) ne sont pas corrélées entre elles, autrement dit un bruit blanc à la date $t-1$ n'a pas d'impact sur le suivant en $t$. Cette hypothèse de non corrélation des bruits est très forte, s'il ne s'agit pas de bruit blanc mais d'un simple "bruit", il est possible de trouver des conclusions erronées. Il est "nécessaire de considérer un modèle plus général prenant en compte cette autocorrélation [...]. Une façon de se ramener à [un bruit blanc (un bruit] sans autocorrélation) consiste à ajouter des variables en différence première retardées à la régression de Dickey-Fuller".^6^
+
+
+### Taux d'inflation
+
+Introduisons $\varepsilon_{t}\sim BB(0,\sigma_{\varepsilon}^{2})$ un bruit blanc.
+
+
+**Modèle 3 : modèle avec une constante et une fonction déterministe**
+
+$$mcpi_{t}= c+ bt+\phi mcpi_{t-1} + z_{t}$$
+$$\Leftrightarrow \Delta mcpi_{t} = c+bt+\phi mcpi_{t-1}+\sum_{j=1}^{p}\delta_{j}\Delta mcpi_{t-1}+\sum_{i=1}^{p}\theta_{j}z_{t-j}$$
+$$\Leftrightarrow \Delta mcpi_{t} = c + bt+\phi mcpi_{t-1}+ \sum_{j=1}^{p}\delta_{j}\Delta mcpi_{t-1}+\varepsilon _{t}$$
+avec $$\varepsilon_{t}=\sum_{j=1}^{p}\theta_{j}z_{t-j}\Rightarrow \varepsilon_{t}\sim BB(0,\sigma_{\varepsilon}^{2}) $$
+
+Test de racine unitaire
+
+* Etape 1 : Hypothèses
+$$
+\left\lbrace 
+\begin{array}{l}
+H_{0} : \phi =0 \Rightarrow x_{t} \ non \ stationnaire, \ présence \ de \ racine \unitaire \\ 
+H_{1} : \phi<0\, \Rightarrow x_{t} \ stationnaire, \ absence \ de \ racine \ unitaire
+\end{array}
+\right. 
+$$
+
+
+* Etape 2 : Statistique du test
+
+
+```{r}
+m_cpi_m3 <- ur.df(y = df[, "m_cpi"], type = "trend", selectlags = "AIC")
+summary(m_cpi_m3)
+```
+
+
+Nous obtenons $t_{ADF}=-3.4984$
+
+* Etape 3 : Règle de décision
+
+$t_{ADF}=-3.4984$. Ainsi la statistique de test est inférieure à la valeur critique au seuil de 5% qui est de -3.43, nous rejetons l'hypothèse nulle de présence de racine unitaire. 
+
+
+On regarde la tendance $b_{t}$
+
+* Etape 1 : Hypothèses
+
+$$
+\left\lbrace 
+\begin{array}{l}
+H_{0} : b = 0 \\
+H_{1} : b \neq 0
+\end{array}
+\right. 
+$$
+* Etape 2 : Statistique du test
+
+$$t_{\hat{b}}=\frac{\hat{b}}{\hat{\sigma{\hat{b}}}}\sim St$$
+
+D'après la sortie de résultats précédente $t_{\hat{b}}=-1.019$ (ratio de student de la composante déterministe). 
+
+* Etape 3 : Regle de décision
+Comme nous procédons à un test de Student, pour trouver la valeur critique nous nous réferons à la table de Student. La valeur critique au seuil de 5% est égale à 1.96. 
+$t_{\hat{b}}$ est inférieure à la valeur critique au seuil de 5%, l'hypothèse nulle n'est donc pas rejetée.
+
+Le modèle 3 n'est donc pas adéquat, nous passons donc au modèle 2. 
+
+ 
+**Modèle 2 : modèle avec une constante**
+
+$$mcpi_{t}= c+ \phi mcpi_{t-1} + z_{t}$$
+$$\Leftrightarrow \Delta mcpi_{t} = c+ \phi mcpi_{t-1}+\sum_{j=1}^{p}\delta_{j}\Delta mcpi_{t-1}+\sum_{i=1}^{p}\theta_{j}z_{t-j}$$
+$$\Leftrightarrow \Delta mcpi_{t} = c + \phi mcpi_{t-1} + \sum_{j=1}^{p}\delta_{j}\Delta mcpi_{t-1}+\varepsilon _{t}$$
+avec $$\varepsilon_{t}=\sum_{j=1}^{p}\theta_{j}z_{t-j}\Rightarrow \varepsilon_{t}\sim BB(0,\sigma_{\varepsilon}^{2}) $$
+
+Test de racine unitaire
+
+* Etape 1 : Hypothèses
+
+$$
+\left\lbrace 
+\begin{array}{l}
+H_{0} : \phi =0 \\ 
+H_{1} : \phi<0\,
+\end{array}
+\right. 
+$$
+
+* Etape 2 : Statistique du test
+
+Pour connaître la statistique du test il suffit d'effectuer le bloc de code suivant :
+
+```{r}
+m_cpi_m2 <- ur.df(y = df[, "m_cpi"], type = "drift", lags = 12, selectlags = "AIC")
+summary(m_cpi_m2)
+```
+
+* Etape 3 : Règle de décision
+
+$t_{ADF}=-3.2156$. Ainsi la statistique de test est inférieure à la valeur critique au seuil de 5% qui est de $-2.88$, nous rejetons l'hypothèse nulle de présence de racine unitaire. 
+
+
+On regarde la constante $c$
+
+* Etape 1 : Hypothèses
+
+$$
+\left\lbrace 
+\begin{array}{l}
+H_{0} : c = 0 \\
+H_{1} : c \neq 0
+\end{array}
+\right. 
+$$
+* Etape 2 : Statistique du test
+
+$$t_{\hat{c}}=\frac{\hat{c}}{\hat{\sigma{\hat{c}}}}\sim St$$
+
+D'après la sortie de résultats précédente, $t_{\hat{c}}=3.105$ (ratio de Student de la constante)
+
+
+ 
+* Etape 3 : Regle de décision
+Comme nous procédons à un test de Student, pour trouver la valeur critique nous nous réferons à la table de Student. La valeur critique au seuil de 5% est égale à 1.96. 
+$t_{\hat{c}}$ est supérieure à la valeur critique au seuil de 5%, l'hypothèse nulle est donc rejetée.
+
+Ainsi la série temporelle du taux d'inflation peut s'écrire de la manière suivante :
+$$\Delta mcpi_{t}=c+\phi mcpi_{t-1}+\sum_{j=1}^{p}\theta_{j}z_{t-j}$$
+
+Le modèle concernant la série temporelle du taux d'inflation est donc stationnaire avec constante.
+
+
+### Taux de chômage
+
+**Modèle 3 : modèle avec une constante et une fonction déterministe**
+
+$$u_{t}= c+ bt+\phi u_{t-1} + z_{t}$$
+$$\Leftrightarrow \Delta u_{t} = c+bt+\phi u_{t-1}+\sum_{j=1}^{p}\delta_{j}\Delta u_{t-1}+\sum_{i=1}^{p}\theta_{j}z_{t-j}$$
+$$\Leftrightarrow \Delta u_{t} = c + bt+\phi u_{t-1}+ \sum_{j=1}^{p}\delta_{j}\Delta u_{t-1}+\varepsilon _{t}$$
+avec $$\varepsilon_{t}=\sum_{j=1}^{p}\theta_{j}z_{t-j}\Rightarrow \varepsilon_{t}\sim BB(0,\sigma_{\varepsilon}^{2}) $$
+
+Test de racine unitaire
+
+* Etape 1 : Hypothèses
+
+$$
+\left\lbrace 
+\begin{array}{l}
+H_{0} : \phi =0 \Rightarrow x_{t} \ non \ stationnaire, \ présence \ de \ racine \ unitaire \\ 
+H_{1} : \phi<0\, \Rightarrow x_{t} \ stationnaire, \ absence \ de \ racine \ unitaire
+\end{array}
+\right. 
+$$
+
+* Etape 2 : Statistique du test
+
+```{r}
+unemp_r_m3 <- ur.df(y = df[, "unemp_r"], type = "trend", lags = 12, selectlags = "AIC")
+summary(unemp_r_m3)
+```
+
+
+* Etape 3 : Règle de décision
+
+$t_{ADF}=-2.6922$. Ainsi la statistique de test est supérieure à la valeur critique au seuil de 5% qui est de $-3.43$, nous ne rejetons pas l'hypothèse nulle de présence de racine unitaire.
+
+On regarde la tendance $b_{t}$
+
+* Etape 1 : Hypothèses
+
+$$
+\left\lbrace 
+\begin{array}{l}
+H_{0} : b = 0 \\
+H_{1} : b \neq 0
+\end{array}
+\right. 
+$$
+
+* Etape 2 : Statistique du test
+
+$$t_{\hat{b}}=\frac{\hat{b}}{\hat{\sigma{\hat{b}}}}\sim DF$$
+
+D'après la sortie de résultats précédente $t_{\hat{b}}=0.779$.
+
+* Etape 3 : Regle de décision
+
+Comme nous procédons à un test bilatéral de Dickey-Fuller, pour trouver la valeur critique nous nous réferons à la table bilatérale de Dickey-Fuller concernant la tendance. La valeur critique est comprise entre 3.12 et 3.14 au seuil de 5% car nous avons 108 observations. 
+$t_{\hat{b}}$ est inférieure à la valeur critique, l'hypothèse nulle n'est donc pas rejetée.
+
+Le modèle 3 n'est donc pas adéquat, nous passons donc au modèle 2. 
+
+
+**Modèle 2 : modèle avec une constante**
+
+$$u_{t}= c+ \phi u_{t-1} + z_{t}$$
+$$\Leftrightarrow \Delta u_{t} = c+ \phi u_{t-1}+ \sum_{j=1}^{p}\delta_{j}\Delta u_{t-1}+\sum_{i=1}^{p}\theta_{j}z_{t-j}$$
+$$\Leftrightarrow \Delta u_{t} = c + \phi u_{t-1} + \sum_{j=1}^{p}\delta_{j}\Delta u_{t-1}+\varepsilon _{t}$$
+avec $$\varepsilon_{t}=\sum_{j=1}^{p}\theta_{j}z_{t-j}\Rightarrow \varepsilon_{t}\sim BB(0,\sigma_{\varepsilon}^{2}) $$
+
+Test de racine unitaire
+
+
+* Etape 1 : Hypothèses
+
+
+$$
+\left\lbrace 
+\begin{array}{l}
+H_{0} : \phi =0 \Rightarrow x_{t} \ non \ stationnaire, \ présence \ de \ racine \ unitaire \\ 
+H_{1} : \phi<0\, \Rightarrow x_{t} \ stationnaire, \ absence \ de \ racine \ unitaire
+\end{array}
+\right. 
+$$
+
+* Etape 2 : Statistique du test
+
+
+Pour connaître la statistique du test il suffit d'effectuer le bloc de code suivant :
+
+```{r}
+unemp_r_m2 <- ur.df(y = df[, "unemp_r"], type = "drift", lags = 12, selectlags = "AIC")
+summary(unemp_r_m2)
+```
+
+En sortie 
+
+* Etape 3 : Règle de décision
+
+$t_{ADF}=-2.596$. Ainsi la statistiques de test est supérieure à la valeur critique au seuil de 5% qui est de $-2.88$, nous ne rejetons pas l'hypothèse nulle de présence de racine unitaire. 
+
+On regarde la constante $c$
+
+* Etape 1 : Hypothèses
+
+$$
+\left\lbrace 
+\begin{array}{l}
+H_{0} : c = 0 \\
+H_{1} : c \neq 0
+\end{array}
+\right. 
+$$
+* Etape 2 : Statistique du test
+
+$$t_{\hat{c}}=\frac{\hat{c}}{\hat{\sigma{\hat{c}}}}\sim DF$$
+
+D'après la sortie de résultats précédente, $t_{\hat{c}}=2.455$.
+
+
+ 
+* Etape 3 : Regle de décision
+Comme nous procédons à un test bilatéral de Dickey-Fuller, pour trouver la valeur critique nous nous réferons à la table bilatérale de Dickey-Fuller concernant la constante. La valeur critique est comprise entre 2.84 et 2.86 au seuil de 5%. 
+$t_{\hat{c}}$ est inférieure à la valeur critique au seuil de 5%, l'hypothèse nulle n'est donc pas rejetée.
+
+Le modèle 2 n'est pas adéquat, nous passons donc au modèle 1.
+
+**Modèle 1 : modèle sans constante et sans composante déterministe**
+
+$$u_{t}= \phi u_{t-1} + z_{t}$$
+$$\Leftrightarrow \Delta u_{t} = \phi u_{t-1}+ \sum_{j=1}^{p}\delta_{j}\Delta u_{t-1}+\sum_{i=1}^{p}\theta_{j}z_{t-j}$$
+$$\Leftrightarrow \Delta u_{t} = \phi u_{t-1} + \sum_{j=1}^{p}\delta_{j}\Delta u_{t-1}+\varepsilon _{t}$$
+avec $$\varepsilon_{t}=\sum_{j=1}^{p}\theta_{j}u_{t-j}\Rightarrow \varepsilon_{t}\sim BB(0,\sigma_{\varepsilon}^{2}) $$
+
+
+Test de racine unitaire
+
+* Etape 1 : Hypothèses
+
+$$
+\left\lbrace 
+\begin{array}{l}
+H_{0} : \phi =0 \Rightarrow x_{t} \ non \ stationnaire, \ présence \ de \ racine \ unitaire \\ 
+H_{1} : \phi<0\, \Rightarrow x_{t} \ stationnaire, \ absence \ de \ racine \ unitaire
+\end{array}
+\right. 
+$$
+
+* Etape 2 : Statistique du test
+
+
+Pour connaître la statistique du test il suffit d'effectuer le bloc de code suivant :
+
+```{r}
+unemp_r_m1 <- ur.df(y = df[, "m_cpi"], type = "none", lags = 12, selectlags = "AIC")
+summary(unemp_r_m1)
+```
+D'après la sortie de résultats $t_{ADF}=-0.7272$.
+
+* Etape 3 : Règle de décision
+
+$t_{ADF}=-0.7272$. Ainsi la statistique de test est supérieure à la valeur critique au seuil de 5% qui est de $-1.95$, nous ne rejetons pas l'hypothèse nulle de présence de racine unitaire.
+
+Le modèle concernant la série temporelle du taux de chômage est donc un modèle DS en marche aléatoire pure. Le processus n'est donc pas stationnaire et pour le stationnariser nous allons procéder à une différenciation.
+
+
+# Identification du modèle ARMA
+
+"L'identification des processus ARMA se réalise sur une série temporelle préalablement stationnarisée"^7^ et présentant de l'autocorrélation ainsi que de l'autocorrélation partielle.
+
+Nous choisissons ici d'identifier le modèle ARMA associé à la série temporelle du taux de chômage. 
+
+$$ut+\sum _{i=1}^{p}\phi_{i}u_{t-i}=c+\varepsilon_{t}+\sum_{i=1}^{q}\theta_{i}\varepsilon_{t-i}$$
+avec : 
+* $ut+\sum _{i=1}^{p}\phi_{i}u_{t-i}$, la partie autorégressive à l'ordre p ou $AR(p)$
+* $c+\varepsilon_{t}+\sum_{i=1}^{q}\theta_{i}\varepsilon_{t-i}$ la partie moyenne mobile à l'ordre q ou $MA(q)$
+
+Nous allons donc commencer par stationnariser la série temporelle du taux de chômage.
+
+$$u_{t}= u_{t-1} + \varepsilon_{t} \Leftrightarrow u_{t}= u_{t-2} + \varepsilon_{t-2} + \varepsilon_{t}\Leftrightarrow u_{t}= u_{t-3} + \varepsilon_{t-3} + \varepsilon_{t-2} + \varepsilon_{t}$$
+$$\Rightarrow u_{t}= u_{0}+\sum_{i=1}^{t}\varepsilon_{i}$$
+
+Le bloc de commande ci-dessous permet d'obtenir $\Delta u_{t}$
+
+```{r}
+unemp_r<-diff(df$unemp_r)
+```
+
+
+Pour déterminer de quel type de modèle ARMA il s'agit, nous générons les autocorrélogrammes simple et partiel.
+
+```{r}
+acf(coredata(unemp_r),main="")
+title(main="Autocorrélation du taux de chômage \nStationnarisé - diff 1ère",
+      cex.main=1,cex.lab=0.7)
+title(sub="Données de 1990 à 2016, source: FRED",
+      cex.sub=0.5,font.sub=3,adj=1)
+```
+
+Nous notons une décroissance progressive de l'autocorrélation du taux de chômage dans le temps dès le premier retard, ce qui peut laisser penser à un processus autorégressif.
+
+```{r}
+pacf(coredata(unemp_r),main="")
+title(main="Autocorrélation partielle du taux de chômage \nStationnarisé en différence première",
+      cex.main=1,cex.lab=0.7)
+title(sub="Données de 1990 à 2016, source: FRED",
+      cex.sub=0.5,font.sub=3,adj=1)
+```
+
+La sortie de l'autocorrélogramme partiel montre une décroissance brutale dès le premier retard. Ensuite les retards sont proches de 0 hormis quelques anglantes aigues (retard 8 et 18).
+
+A partir de nos observations il existe deux possibilité pour modèliser la série temporelle du taux de chômage. D'une part la série temporelle du taux de chômage pourrait suivre un processus autorégressif d'ordre 1 ou AR(1). En effet nous observons une décroissance progressive pour l'ACF et brutale pour la PACF, phénomènes caractéristiques d'un processus autorégressifs. L'ordre est quant à lui déterminer par le nombre de barres significatives dans l'autocorrélogramme partiel, ici une. D'autre part la série temporelle dut aux de chômage pourrait suivre un processus ARMA d'ordre (1,5). Effectivement, certes la décroissance du taux de chômage est progressive sur l'autocorrélogramme simple néanmoins il est possible de penser qu'elle est rapide. Le taux de chômage serait donc un mix entre un processus AR(1) (nombre de barres significatives sur l'autocorrélogramme partiel) et un processus MA(5) (nombre de barres significatives sur l'autocorrélogramme partiel).
+
+
+
+## Estimation et spécification et prévision du modèle ARMA du taux de chômage
+
+Pour estimer quel modèle ARMA correspond à la série temporelle du taux de chômage aux Etats-Unis il faudra tester au fur et à mesure les différents ordres possibles du processus ARMA. Nous partons du modèle ARMA(1,5)
+
+
+### Estimation
+
+#### Estimation d'un ARMA (1,0) ou AR(1)
+
+##### Test d'analyse des racines
+
+Nous souhaitons ici savoir si les racines de la partie AR sont de module strictement supérieur à 1, $|r|>1$ (ou inférieures ou égales à 1, $|r|\leq 1$) et ainsi la partie AR est stationnaire (non stationnaire).
+
+Nous souhaitons également savoir si les racines de la partie MA sont de module strictement supérieur à 1, $|r|>1$ (ou inférieures ou égales à 1, $|r|\leq 1$) et ainsi la partie MA est inversible (non inversible).
+
+D'après la sortie de résultat suivante il semble que l'ensemble des racines soient de module strictement supérieur à 1. Partie MA inversible et partie AR stationnaire.
+
+```{r}
+AR1<-arima(unemp_r,order=c(1,0,0))
+autoplot(AR1)+
+  labs(caption="Série taux de chômage",title="Disque")+
+  theme(plot.title=element_text(face="bold",size=15,hjust=0.5))+
+  theme(plot.caption=element_text(face="italic",size=6,hjust=0))
+
+```
+
+### Test de Student des paramètres
+
+Pour savoir si l'ensemble des coefficients sont négatifs ou non, nous réalisons un test de Student (ou test de significativité).
+
+Nous souhaitons ici savoir si l'ensemble de coefficients sont significatifs ou non.
+
+* Etape 1 : Hypothèses du test 
+
+$$\left\lbrace 
+\begin{array}{l}
+H_{0} : \left(
+\begin{array}{l}
+\phi_{1} \\
+· \\
+· \\
+· \\
+\phi_{p}
+\end{array} \right) = \left(
+\begin{array}{l}
+0 \\
+· \\
+· \\
+· \\
+0
+\end{array} \right) \\
+H_{1} : \left(
+\begin{array}{l}
+\phi_{1} \\
+· \\
+· \\
+· \\
+\phi_{p}
+\end{array} \right) \neq \left(
+\begin{array}{l}
+0 \\
+· \\
+· \\
+· \\
+0
+\end{array} \right)
+\end{array}
+\right. $$
+
+
+* Etape 2 : Statistique du test
+
+$$t^{*}_{\hat{\phi_{i}}}=\frac{\hat{\phi_{i}}}{\hat{\sigma{\hat{\phi_{i}}}}}\sim St_{(T-h)}$$
+
+D'après la sortie de résultat de la commande `arima`
+
+```{r}
+coeftest(AR1)
+```
+Donc : 
+* $t^{*}_{\hat{\phi_{1}}}=10.7465$ 
+
+
+* Etape 3 : Règle de décision
+
+La valeur critique au seuil de 5% lue dans la table bilatérale de Student est $\mu_{(1-\frac{\alpha}{2})}=\mu_{0.975}=1.96$. 
+* $|t^{*}_{\hat{\phi_{1}}}|>1.96 \Rightarrow significatif$, 
+
+
+Il faut donc essayer d'ajouter un paramètre à la partie MA. Nous passons à processus ARMA (1,1)
+
+#### Estimation d'un ARMA (1,1)
+
+##### Test d'analyse des racines
+
+Nous souhaitons ici savoir si les racines de la partie AR sont de module strictement supérieur à 1, $|r|>1$ (ou inférieures ou égales à 1, $|r|\leq 1$) et ainsi la partie AR est stationnaire (non stationnaire).
+
+Nous souhaitons également savoir si les racines de la partie MA sont de module strictement supérieur à 1, $|r|>1$ (ou inférieures ou égales à 1, $|r|\leq 1$) et ainsi la partie MA est inversible (non inversible).
+
+D'après la sortie de résultat suivante il semble que l'ensemble des racines soient de module strictement supérieur à 1. Partie MA inversible et partie AR stationnaire.
+
+```{r}
+ARMA_1_1<-arima(unemp_r,order=c(1,0,1))
+autoplot(ARMA_1_1)+
+  labs(caption="Série taux de chômage",title="Disque")+
+  theme(plot.title=element_text(face="bold",size=15,hjust=0.5))+
+  theme(plot.caption=element_text(face="italic",size=6,hjust=0))
+
+```
+
+##### Test de Student des paramètres
+
+Pour savoir si l'ensemble des coefficients sont négatifs ou non, nous réalisons un test de Student (ou test de significativité).
+
+Nous souhaitons ici savoir si l'ensemble de coefficients sont significatifs ou non.
+
+* Etape 1 : Hypothèses du test 
+
+$$\left\lbrace 
+\begin{array}{l}
+H_{0} : \left(
+\begin{array}{l}
+\phi_{1} \\
+· \\
+· \\
+· \\
+\phi_{p}
+\end{array} \right) = \left(
+\begin{array}{l}
+0 \\
+· \\
+· \\
+· \\
+0
+\end{array} \right) \\
+H_{1} : \left(
+\begin{array}{l}
+\phi_{1} \\
+· \\
+· \\
+· \\
+\phi_{p}
+\end{array} \right) \neq \left(
+\begin{array}{l}
+0 \\
+· \\
+· \\
+· \\
+0
+\end{array} \right)
+\end{array}
+\right. $$
+
+
+* Etape 2 : Statistique du test
+
+$$t^{*}_{\hat{\phi_{i}}}=\frac{\hat{\phi_{i}}}{\hat{\sigma{\hat{\phi_{i}}}}}\sim St_{(T-h)}$$
+
+D'après la sortie de résultat de la commande `arima`
+
+```{r}
+coeftest(ARMA_1_1)
+```
+Donc : 
+* $t^{*}_{\hat{\phi_{1}}}=10.3814$, 
+* $t^{*}_{\hat{\theta_{1}}}=-1.3397$
+
+* Etape 3 : Règle de décision
+
+La valeur critique au seuil de 5% lue dans la table bilatérale de Student est $\mu_{(1-\frac{\alpha}{2})}=\mu_{0.975}=1.96$. 
+* $|t^{*}_{\hat{\phi_{1}}}|>1.96 \Rightarrow significatif$, 
+* $|t^{*}_{\hat{\theta_{1}}}|<1.96 \Rightarrow  non \ significatif$
+
+La série temporelle du taux de chômage stationnarisé en différence première peut donc être modélisée par un processus AR(1).
+
+
+
+###### Tests sur les résidus
+
+Nous souhaitons ici savoir si les résidus du processus AR(1) de la série temporelle du taux de chômage se comportent comme un bruit blanc.
+Or un bruit blanc $\varepsilon_{t}\sim BB(0,\sigma_{\varepsilon}^{2})$ possède les propriétés suivantes :
+* $cov(\varepsilon_{t}\varepsilon_{t-h})=0    \sigma_{\varepsilon}^{2}$
+* $\varepsilon_{t}\sim N(0,\sigma_{\varepsilon}^{2}) \Rightarrow \ Bruit \ blanc \ gaussien$
+* $V(\varepsilon_{t})=\sigma_{\varepsilon}^{2} \Leftrightarrow V(\varepsilon_{t})\ \bot \ t \Rightarrow \ homoscédasticité$
+
+###### Test d'absence d'autocorrélation - de Ljung-Box
+
+* Etape 1 : Hypothèses
+
+$$\left\lbrace 
+\begin{array}{l}
+H_{0} : \left(
+\begin{array}{l}
+\rho_{1} \\
+· \\
+· \\
+· \\
+\rho_{20}
+\end{array} \right) = \left(
+\begin{array}{l}
+0 \\
+· \\
+· \\
+· \\
+0
+\end{array} \right) \\
+H_{1} : \left(
+\begin{array}{l}
+\rho_{1} \\
+· \\
+· \\
+· \\
+\rho_{20}
+\end{array} \right) \neq \left(
+\begin{array}{l}
+0 \\
+· \\
+· \\
+· \\
+0
+\end{array} \right)
+\end{array}
+\right. $$
+
+
+
+* Etape 2 : Statistique du test
+
+$$Q_{k}^{*}=T(T+2)\sum_{j=1}^{k}\frac{1}{T-j}\hat{\rho_{j}^{2}}\sim\chi^{2}_{(k-p-q)}$$
+ici 
+* $T$ désigne notre nombre d'observations à savoir 108.
+* $p$ l'ordre de la partie AR ici 1,
+* $q$ l'ordre de la partie MA (nulle).
+
+```{r}
+ljung_box <- checkresiduals(AR1,lag=20)
+```
+D'après la sortie ci-dessus $Q_{20}^{*}=24.255$
+
+
+* Etape 3 : Règle de décision
+
+Nous comparons ce résultat à la valeur critique au seuil de 5% lue dans la table de Chi-Deux. $\chi_{1-\alpha}^{2}(k-p-q)=\chi_{0.975}^{2}(19)=30.144$. $Q_{20}^{*}<\chi_{0.975}^{2}(19)$, $H_{0}$ n'est pas rejetée au seuil de 5%.  
+Il n'y pas d'autocorrélation des résidus
+
+
+#### Test de normalité - de Jarque et Bera
+
+* Etape 1 : Hyothèses
+
+$$\left\lbrace 
+\begin{array}{l}
+H_{0} : \left(
+\begin{array}{l}
+S(X) \\
+K(X)
+\end{array} \right) = \left(
+\begin{array}{l}
+0 \\
+3
+\end{array} \right) \\
+H_{1} : \left(
+\begin{array}{l}
+S(X) \\
+K(X)
+\end{array} \right) \neq \left(
+\begin{array}{l}
+0 \\
+3
+\end{array} \right)
+\end{array}
+\right. $$
+
+
+* Etape 2 : Statistique du test
+
+$$LJB=\frac{T-(p+q)}{6}[\hat{S(X)}]^{2}+\frac{T-(p+q)}{24}[\hat{K(X)}-3]^{2}\sim\chi^{2}_{2}$$
+Le kurtosis et le skewness se retrouvent par la commande suivante :
+
+```{r}
+paste("Residuals Skewness",skewness(AR1$residuals),sep=" ")
+paste("Residuals kurtosis",kurtosis(AR1$residuals),sep=" ")
+```
+
+La fonction `jarque.bera.test` permet d'obtenir la statistique du test. Ainsi d'après la sortie de résultats ci-dessous : $LBJ^{*}=10.949$
+
+```{r}
+jarque.bera.test(AR1$residuals)
+```
+* Etape 3 : Règle de décision
+
+
+
+
+
+#### Test d'homoscédasticité - d'un effet ARCH
+
+* Etape 1 : Hyothèses
+
+$$\left\lbrace 
+\begin{array}{l}
+H_{0} : \left(
+\begin{array}{l}
+\alpha_{1} \\
+· \\
+· \\
+· \\
+\alpha_{q}
+\end{array} \right) = \left(
+\begin{array}{l}
+0 \\
+· \\
+· \\
+· \\
+0
+\end{array} \right) \\
+H_{1} : \left(
+\begin{array}{l}
+\alpha_{1} \\
+· \\
+· \\
+· \\
+\alpha_{q}
+\end{array} \right) \neq \left(
+\begin{array}{l}
+0 \\
+· \\
+· \\
+· \\
+0
+\end{array} \right)
+\end{array}
+\right. $$
+
+
+* Etape 2 : Statistique du test
+
+
+$$LM=T\times R^{2}\sim\chi^{2}_{(q)}$$
+
+* Etape 3 : Règle de décision
+
+
+
+# Modélisation multivariée de la relation inflation-chômage
+
+
+
+
+
+
+
+# Annexes
+
+## Tests
+### Test de Student
+* Etape 1 : Hypothèses du test 
+
+$$\left\lbrace 
+\begin{array}{l}
+H_{0} : 
+\phi_{i} =0 \\
+H_{1} :
+\phi_{i}\neq 0
+\end{array}
+\right. $$
+
+
+* Etape 2 : Statistique du test
+
+$$t^{*}_{\hat{\phi_{i}}}=\frac{\hat{\phi_{i}}}{\hat{\sigma{\hat{\phi_{i}}}}}\sim St_{(T-h)}$$
+
+* Etape 3 : Règle de décision
+
+Si $|t^{*}_{\hat{\phi_{i}}}|$ est supérieure à valeur critique au seuil de 5% lue dans la table bilatérale de Student $\Rightarrow$ rejet de $H_{0}$ $\Rightarrow$ variable significative. 
+Si $|t^{*}_{\hat{\phi_{i}}}|$ est inférieure à valeur critique au seuil de 5% lue dans la table bilatérale de Student $\Rightarrow$ non rejet de $H_{0}$ $\Rightarrow$ variable non significative. 
+
+### Test de Ljung-Box 
+
+### Test de Jarque-Berra
+
+## Sources des données
+* ^1^ Hélène Lenoble-Liaud (2023), Relation de Phillips
+* ^2^ Hélène Lenoble-Liaud (2023), Relation de Phillips augmentée
+* ^3^ Données trimestrielles du taux de chômage aux Etats-Unis de 1990 à 2016 corrigées des variations saisonnières, issues de la FRED (*Federal Reserve Bank of St. Louis*).
+* ^4^ Indice des prix à la consommation médian ou *"Median Consumer Price Index (CPI) is a measure of core inflation calculated the Federal Reserve Bank of Cleveland and the Ohio State University. Median CPI was created as a different way to get a 'Core CPI' measure, or a better measure of underlying inflation trends. To calculate the Median CPI, the Cleveland Fed analyzes the median price change of the goods and services published by the BLS. The median price change is the price change that's right in the middle of the long list of all of the price changes. This series excludes 49.5% of the CPI components with the highest and lowest one-month price changes from each tail of the price-change distribution resulting in a Median CPI Inflation Estimate. According to research from the Cleveland Fed, the Median CPI provides a better signal of the inflation trend than either the all-items CPI or the CPI excluding food and energy"* , Indice des prix à la consommation médian, FRED (*Federal Reserve Bank of *).
+
+* ^5^ Données trimestrielles du taux d'inflation (variation de l'indice des prix à la consommation médian) aux Etatst-Unis de 1990 à 2016 corrigées des variations saisonnières, issues de la FRED (*Federal Reserve Bank of St. Louis*)
+* ^6^ Yannick LP. (2023), Processus aléatoires non-stationnaires
+* ^7^ Guillaume Arbod, Econométrie des séries temporelles (2023)
+
